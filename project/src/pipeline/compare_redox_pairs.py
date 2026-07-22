@@ -65,6 +65,17 @@ def _role_prefix_rmsd(
     return _rmsd(role_ref, role_tgt)
 
 
+def _role_suffix_rmsd(
+    reference_df: pd.DataFrame, aligned_target: np.ndarray, role_suffix: str
+) -> float | None:
+    role_mask = reference_df["atom_role"].str.endswith(role_suffix).to_numpy()
+    if not role_mask.any():
+        return None
+    role_ref = reference_df.loc[role_mask, ["x", "y", "z"]].to_numpy(dtype=float)
+    role_tgt = aligned_target[role_mask]
+    return _rmsd(role_ref, role_tgt)
+
+
 def _mean_distance_to_role(df: pd.DataFrame, source_role: str, target_role: str) -> float | None:
     source = df[df["atom_role"] == source_role][["x", "y", "z"]].to_numpy(dtype=float)
     target = df[df["atom_role"] == target_role][["x", "y", "z"]].to_numpy(dtype=float)
@@ -85,6 +96,21 @@ def _mean_distance_to_role_prefix(
 ) -> float | None:
     source = df[df["atom_role"] == source_role][["x", "y", "z"]].to_numpy(dtype=float)
     target = df[df["atom_role"].str.startswith(target_prefix)][["x", "y", "z"]].to_numpy(
+        dtype=float
+    )
+    if len(source) == 0 or len(target) == 0:
+        return None
+    if len(source) != 1:
+        raise ValueError(f"Expected exactly one {source_role}, found {len(source)}")
+    distances = np.linalg.norm(target - source[0], axis=1)
+    return float(distances.mean())
+
+
+def _mean_distance_to_role_suffix(
+    df: pd.DataFrame, source_role: str, target_suffix: str
+) -> float | None:
+    source = df[df["atom_role"] == source_role][["x", "y", "z"]].to_numpy(dtype=float)
+    target = df[df["atom_role"].str.endswith(target_suffix)][["x", "y", "z"]].to_numpy(
         dtype=float
     )
     if len(source) == 0 or len(target) == 0:
@@ -140,15 +166,26 @@ def compare_redox_pairs(selected_atoms_csv: str, output_csv: str) -> pd.DataFram
         metal_center_rmsd = _role_rmsd(ox_ordered, red_aligned, "metal_center")
         donor_n_rmsd = _role_rmsd(ox_ordered, red_aligned, "donor_N")
         donor_atom_rmsd = _role_prefix_rmsd(ox_ordered, red_aligned, "donor_")
-        relevant_o_rmsd = _role_rmsd(ox_ordered, red_aligned, "relevant_O")
         fe_rmsd = _role_rmsd(ox_ordered, red_aligned, "ferrocene_Fe")
+        ferrocene_c_rmsd = _role_rmsd(ox_ordered, red_aligned, "ferrocene_C")
+        oxygen_atom_rmsd = _role_suffix_rmsd(ox_ordered, red_aligned, "_O")
+        phenoxy_o_rmsd = _role_rmsd(ox_ordered, red_aligned, "phenoxy_O")
+        alkoxide_o_rmsd = _role_rmsd(ox_ordered, red_aligned, "alkoxide_O")
+        monomer_o_rmsd = _role_rmsd(ox_ordered, red_aligned, "monomer_O")
+        monomer_c_rmsd = _role_rmsd(ox_ordered, red_aligned, "monomer_C")
 
         ox_m_n = _mean_distance_to_role(ox_ordered, "metal_center", "donor_N")
         red_m_n = _mean_distance_to_role(red_ordered, "metal_center", "donor_N")
         ox_m_donor = _mean_distance_to_role_prefix(ox_ordered, "metal_center", "donor_")
         red_m_donor = _mean_distance_to_role_prefix(red_ordered, "metal_center", "donor_")
-        ox_m_o = _mean_distance_to_role(ox_ordered, "metal_center", "relevant_O")
-        red_m_o = _mean_distance_to_role(red_ordered, "metal_center", "relevant_O")
+        ox_m_o = _mean_distance_to_role_suffix(ox_ordered, "metal_center", "_O")
+        red_m_o = _mean_distance_to_role_suffix(red_ordered, "metal_center", "_O")
+        ox_m_phenoxy = _mean_distance_to_role(ox_ordered, "metal_center", "phenoxy_O")
+        red_m_phenoxy = _mean_distance_to_role(red_ordered, "metal_center", "phenoxy_O")
+        ox_m_alkoxide = _mean_distance_to_role(ox_ordered, "metal_center", "alkoxide_O")
+        red_m_alkoxide = _mean_distance_to_role(red_ordered, "metal_center", "alkoxide_O")
+        ox_m_monomer_o = _mean_distance_to_role(ox_ordered, "metal_center", "monomer_O")
+        red_m_monomer_o = _mean_distance_to_role(red_ordered, "metal_center", "monomer_O")
         ox_m_fe = _fe_distance(ox_ordered)
         red_m_fe = _fe_distance(red_ordered)
 
@@ -163,17 +200,31 @@ def compare_redox_pairs(selected_atoms_csv: str, output_csv: str) -> pd.DataFram
                 "metal_center_rmsd": metal_center_rmsd,
                 "donor_atom_rmsd": donor_atom_rmsd,
                 "donor_N_rmsd": donor_n_rmsd,
-                "relevant_O_rmsd": relevant_o_rmsd,
+                "oxygen_atom_rmsd": oxygen_atom_rmsd,
+                "phenoxy_O_rmsd": phenoxy_o_rmsd,
+                "alkoxide_O_rmsd": alkoxide_o_rmsd,
+                "monomer_O_rmsd": monomer_o_rmsd,
                 "ferrocene_Fe_rmsd": fe_rmsd,
+                "ferrocene_C_rmsd": ferrocene_c_rmsd,
+                "monomer_C_rmsd": monomer_c_rmsd,
                 "mean_metal_to_any_donor_ox": ox_m_donor,
                 "mean_metal_to_any_donor_red": red_m_donor,
                 "mean_metal_to_any_donor_change": _safe_delta(ox_m_donor, red_m_donor),
                 "mean_metal_to_donor_N_ox": ox_m_n,
                 "mean_metal_to_donor_N_red": red_m_n,
                 "mean_metal_to_donor_N_change": _safe_delta(ox_m_n, red_m_n),
-                "mean_metal_to_relevant_O_ox": ox_m_o,
-                "mean_metal_to_relevant_O_red": red_m_o,
-                "mean_metal_to_relevant_O_change": _safe_delta(ox_m_o, red_m_o),
+                "mean_metal_to_any_oxygen_ox": ox_m_o,
+                "mean_metal_to_any_oxygen_red": red_m_o,
+                "mean_metal_to_any_oxygen_change": _safe_delta(ox_m_o, red_m_o),
+                "mean_metal_to_phenoxy_O_ox": ox_m_phenoxy,
+                "mean_metal_to_phenoxy_O_red": red_m_phenoxy,
+                "mean_metal_to_phenoxy_O_change": _safe_delta(ox_m_phenoxy, red_m_phenoxy),
+                "mean_metal_to_alkoxide_O_ox": ox_m_alkoxide,
+                "mean_metal_to_alkoxide_O_red": red_m_alkoxide,
+                "mean_metal_to_alkoxide_O_change": _safe_delta(ox_m_alkoxide, red_m_alkoxide),
+                "mean_metal_to_monomer_O_ox": ox_m_monomer_o,
+                "mean_metal_to_monomer_O_red": red_m_monomer_o,
+                "mean_metal_to_monomer_O_change": _safe_delta(ox_m_monomer_o, red_m_monomer_o),
                 "metal_to_Fe_ox": ox_m_fe,
                 "metal_to_Fe_red": red_m_fe,
                 "metal_to_Fe_change": _safe_delta(ox_m_fe, red_m_fe),
